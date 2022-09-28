@@ -6,8 +6,12 @@
 #include "stdio.h"
 #include "stdlib.h"
 #include "string.h"
+#include "ctype.h"
 
 #define MAX_CMD_BUFFER 255
+
+char last_command[MAX_CMD_BUFFER] = "";
+char last_line[MAX_CMD_BUFFER] = "\0";
 
 char* read_line(){
 	char* buffer = (char*) malloc(MAX_CMD_BUFFER*sizeof(char));
@@ -29,7 +33,6 @@ char** parse_line(char* line){
 	}
 
 int execute(char** arg){
-
 	if(!strcmp(arg[0],"echo")){
 		int i;
 		for(i = 1;arg[i] != NULL;i++){
@@ -39,13 +42,32 @@ int execute(char** arg){
 		return 1;
 	}
 	else if(!strcmp(arg[0],"exit")){
-		printf("bye \n");
-		exit(arg[1]);
+		if( *arg[1] >= '0' && *arg[1] <= '9'){
+			printf("bye \n");
+		        exit(*arg[1]);
+		}
+		else{
+		   printf("Command not found \n");
+		}
+	}
+	else if(!strcmp(arg[0],"!!")){
+		if(strcmp(last_command,"!!")){
+		    printf("%s",last_line);
+		    int x = execute(parse_line(last_line));
+		}
+		else{
+		    printf("Previously !!\n");
+		}
 	}
 	else{
-		printf("Command not found");
+		printf("Command not found \n");
 	}
 	return 1;
+}
+
+void remember_me(char** arg,char* temp){
+	strcpy(last_line,temp);
+        strcpy(last_command,arg[0]);
 }
 
 int main() {
@@ -55,8 +77,13 @@ int main() {
     do {
         printf("icsh $ ");
         buffer = read_line();
+        char* temp = (char*) malloc(strlen(buffer) + 1);
+        strcpy(temp,buffer);
         arg = parse_line(buffer);
         status = execute(arg);
+        
+        remember_me(arg,temp);
+      
         free(buffer);
         free(arg);
     }while (status);
