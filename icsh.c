@@ -7,6 +7,7 @@
 #include "stdlib.h"
 #include "string.h"
 #include "ctype.h"
+#include "errno.h"
 
 #define MAX_CMD_BUFFER 255
 
@@ -31,9 +32,15 @@ char** parse_line(char* line){
 		}
 	return parse_list;
 	}
+	
+int excode = 0;
 
 int execute(char** arg){
 	if(!strcmp(arg[0],"echo")){
+	        if(!strcmp(arg[1],"$?")){
+	        	printf("%d\n",excode);
+	        	return 1;
+	        }
 		int i;
 		for(i = 1;arg[i] != NULL;i++){
 			printf("%s ",arg[i]);
@@ -41,27 +48,64 @@ int execute(char** arg){
 		printf("\n");
 		return 1;
 	}
-	else if(!strcmp(arg[0],"exit")){
+	if(!strcmp(arg[0],"exit")){
 		if( *arg[1] >= '0' && *arg[1] <= '9'){
-			printf("bye \n");
-		        exit(*arg[1]);
+		        return atoi(arg[1]);
 		}
 		else{
 		   printf("Command not found \n");
+		   return 1;
 		}
 	}
-	else if(!strcmp(arg[0],"!!")){
+	if(!strcmp(arg[0],"!!")){
 		if(strcmp(last_command,"!!")){
 		    printf("%s",last_line);
 		    int x = execute(parse_line(last_line));
+		    return 1;
 		}
 		else{
 		    printf("Previously !!\n");
+		    return 1;
 		}
 	}
-	else{
-		printf("Command not found \n");
+	if(!strcmp(arg[0],"./icsh")){
+		FILE* file = fopen(arg[1],"r");
+		char *line = NULL;
+		size_t len = 0;
+		int status = 1;
+		
+		while(getline(&line,&len,file) != -1){
+			char* temp = (char*) malloc(strlen(line) + 1);
+                        strcpy(temp,line);
+                        char** arg = parse_line(line);
+                        status = execute(arg);
+                        remember_me(arg,temp);
+                        free(temp);
+                        free(arg);
+		}
+		
+		excode = status;
+		fclose(file);
+		free(line);
+		return 1;
+		
 	}
+
+	int pid;
+	int status;
+	
+	if((pid=fork()) < 0){
+		perror("Fork failed");
+		exit(errno);
+	}
+	if(!pid){
+		execvp(arg[0],arg);
+	}
+	if(pid){
+		waitpid(pid,NULL,0);
+	
+	}
+	
 	return 1;
 }
 
@@ -73,7 +117,7 @@ void remember_me(char** arg,char* temp){
 int main() {
     char *buffer;
     char **arg;
-    int status = 0;
+    int status = 1;
     do {
         printf("icsh $ ");
         buffer = read_line();
@@ -81,10 +125,11 @@ int main() {
         strcpy(temp,buffer);
         arg = parse_line(buffer);
         status = execute(arg);
-        
         remember_me(arg,temp);
-      
         free(buffer);
+        free(temp);
         free(arg);
-    }while (status);
+    }while (status == 1);
+    printf("bye \n");
+    exit(status);
 }
