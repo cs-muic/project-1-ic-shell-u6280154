@@ -8,15 +8,21 @@
 #include "string.h"
 #include "ctype.h"
 #include "errno.h"
+#include "signal.h"
 
 #define MAX_CMD_BUFFER 255
 
 char last_command[MAX_CMD_BUFFER] = "";
 char last_line[MAX_CMD_BUFFER] = "\0";
 
+void handler(int signum){
+	puts("");
+}
+
 char* read_line(){
-	char* buffer = (char*) malloc(MAX_CMD_BUFFER*sizeof(char));
-	fgets(buffer, 255, stdin);
+	char* buffer = NULL;
+	size_t buff_size = 0;
+	getline(&buffer,&buff_size,stdin);
 	return buffer;
 }
 
@@ -36,6 +42,9 @@ char** parse_line(char* line){
 int excode = 0;
 
 int execute(char** arg){
+        if(arg[0] == NULL){
+        	return 1;
+        }
 	if(!strcmp(arg[0],"echo")){
 	        if(!strcmp(arg[1],"$?")){
 	        	printf("%d\n",excode);
@@ -99,11 +108,12 @@ int execute(char** arg){
 		exit(errno);
 	}
 	if(!pid){
-		execvp(arg[0],arg);
+		if(execvp(arg[0],arg) == -1){
+			exit(EXIT_FAILURE);
+		}
 	}
 	if(pid){
 		waitpid(pid,NULL,0);
-	
 	}
 	
 	return 1;
@@ -114,13 +124,32 @@ void remember_me(char** arg,char* temp){
         strcpy(last_command,arg[0]);
 }
 
+
+void handler_TSTP(int signum){
+	printf("\nActivate");
+	exit(signum);
+}
+
+
+
 int main() {
     char *buffer;
     char **arg;
     int status = 1;
-    do {
-        printf("icsh $ ");
+    
+    struct sigaction sa;
+    sa.sa_flags = 0;
+    sa.sa_handler = &handler;
+    sigemptyset(&sa.sa_mask);
+    
+    sigaction(SIGINT,&sa,NULL);
+    
+    do { 
+        printf("icsh $ "); 
         buffer = read_line();
+        if(buffer[0] == '\0'){
+        	continue;
+        }
         char* temp = (char*) malloc(strlen(buffer) + 1);
         strcpy(temp,buffer);
         arg = parse_line(buffer);
@@ -129,6 +158,7 @@ int main() {
         free(buffer);
         free(temp);
         free(arg);
+        
     }while (status == 1);
     printf("bye \n");
     exit(status);
