@@ -15,9 +15,31 @@
 char last_command[MAX_CMD_BUFFER] = "";
 char last_line[MAX_CMD_BUFFER] = "\0";
 
-void handler(int signum){
-	puts("");
+void INThandler(int signum){
+	fflush(stdout);
 }
+
+void TSTPhandler(int signum){
+	fflush(stdout);
+}
+
+void ChildHandler(int sig,siginfo_t *sip,void *notused){
+        int status;
+	fflush(stdout);
+	status = 0;
+	if(sip->si_pid == waitpid(sip->si_pid,&status,WNOHANG)){
+		if(WIFEXITED(status)||WTERMSIG(status))
+			printf("\n");
+		
+		else
+			printf("\n");
+		
+	}
+	else{
+		printf("\n");
+	}
+}
+
 
 char* read_line(){
 	char* buffer = NULL;
@@ -27,7 +49,7 @@ char* read_line(){
 }
 
 char** parse_line(char* line){
-	char** parse_list = malloc(10*sizeof(char*));
+	char** parse_list = malloc(sizeof(char*));
 	char* temp;
 	int i = 0;
 	temp = strtok(line," \t\r\n");
@@ -41,82 +63,90 @@ char** parse_line(char* line){
 	
 int excode = 0;
 
+
+char** prev;
+
 int execute(char** arg){
+        int status = 1;   
         if(arg[0] == NULL){
-        	return 1;
+        	return status;
         }
-	if(!strcmp(arg[0],"echo")){
+	else if(!strcmp(arg[0],"echo")){
 	        if(!strcmp(arg[1],"$?")){
 	        	printf("%d\n",excode);
-	        	return 1;
 	        }
-		int i;
-		for(i = 1;arg[i] != NULL;i++){
-			printf("%s ",arg[i]);
-		}
-		printf("\n");
-		return 1;
+	        else{
+	            int i;
+	            for(i = 1;arg[i] != NULL;i++){
+		         printf("%s ",arg[i]);
+		    }
+		    printf("\n");
+	  }
 	}
-	if(!strcmp(arg[0],"exit")){
+	else if(!strcmp(arg[0],"exit")){
 		if( *arg[1] >= '0' && *arg[1] <= '9'){
-		        return atoi(arg[1]);
+		        status = atoi(arg[1]);
 		}
 		else{
 		   printf("Command not found \n");
-		   return 1;
 		}
 	}
-	if(!strcmp(arg[0],"!!")){
-		if(strcmp(last_command,"!!")){
-		    printf("%s",last_line);
-		    int x = execute(parse_line(last_line));
-		    return 1;
+	else if(!strcmp(arg[0],"!!")){
+		if(strcmp(prev[0],"!!")){
+		    int i = 0;
+		    while(prev[i] != NULL){
+		    	printf("%s ",prev[i]);
+		    	i++; 
+		    }
+		    printf("\n");
+		    int x = execute(prev);
 		}
 		else{
 		    printf("Previously !!\n");
-		    return 1;
 		}
 	}
-	if(!strcmp(arg[0],"./icsh")){
+	
+	else if(!strcmp(arg[0],"./icsh")){
 		FILE* file = fopen(arg[1],"r");
-		char *line = NULL;
+		char *line;
+		char **args;
 		size_t len = 0;
-		int status = 1;
-		
+		int stat = 1;
+		ssize_t read;
 		while(getline(&line,&len,file) != -1){
-			char* temp = (char*) malloc(strlen(line) + 1);
-                        strcpy(temp,line);
-                        char** arg = parse_line(line);
-                        status = execute(arg);
-                        remember_me(arg,temp);
-                        free(temp);
-                        free(arg);
+			args = parse_line(line);
+			stat = execute(args);
 		}
-		
-		excode = status;
+		excode = stat;
 		fclose(file);
 		free(line);
-		return 1;
-		
+		free(args);
 	}
-
-	int pid;
-	int status;
-	
-	if((pid=fork()) < 0){
+	else{
+	    int pid;
+	    int status;
+	    if((pid=fork()) < 0){
 		perror("Fork failed");
 		exit(errno);
-	}
-	if(!pid){
-		if(execvp(arg[0],arg) == -1){
+	    	}
+	    if(!pid){
+	    
+
+               
+		if(execvp(arg[0],arg) < 0){
 			exit(EXIT_FAILURE);
 		}
-	}
-	if(pid){
+	    }
+	    if(pid){
 		waitpid(pid,NULL,0);
-	}
-	
-	return 1;
+	    }	
+	 }
+	 
+	 if(memcmp(&prev,&arg,sizeof(arg)) != 0){
+	 	prev = arg;
+	 }
+	 
+	return status;
 }
 
 void remember_me(char** arg,char* temp){
@@ -130,36 +160,38 @@ void handler_TSTP(int signum){
 	exit(signum);
 }
 
-
-
 int main() {
-    char *buffer;
+    char *buffer = NULL;
     char **arg;
     int status = 1;
     
     struct sigaction sa;
-    sa.sa_flags = 0;
-    sa.sa_handler = &handler;
+    sa.sa_flags = SA_RESTART;
+    sa.sa_handler = INThandler;
     sigemptyset(&sa.sa_mask);
-    
     sigaction(SIGINT,&sa,NULL);
     
+    struct sigaction sa1;
+    sa1.sa_flags = 0;
+    sa1.sa_sigaction = ChildHandler;
+    sigemptyset(&sa1.sa_mask);
+    sigaction(SIGCHLD,&sa1,NULL);
+    
+    struct sigaction sa2;
+    sa2.sa_flags = SA_RESTART;
+    sa2.sa_handler = TSTPhandler;
+    sigemptyset(&sa2.sa_mask);
+    sigaction(SIGTSTP,&sa2,NULL);
+    
+    
     do { 
-        printf("icsh $ "); 
+        printf("icsh $ ");
         buffer = read_line();
-        if(buffer[0] == '\0'){
-        	continue;
-        }
-        char* temp = (char*) malloc(strlen(buffer) + 1);
-        strcpy(temp,buffer);
         arg = parse_line(buffer);
         status = execute(arg);
-        remember_me(arg,temp);
-        free(buffer);
-        free(temp);
-        free(arg);
-        
     }while (status == 1);
     printf("bye \n");
+    free(buffer);
+    free(arg);
     exit(status);
 }
