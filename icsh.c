@@ -3,24 +3,26 @@
  * StudentID: 6280154
  */
 
-#include "stdio.h"
-#include "stdlib.h"
-#include "string.h"
-#include "ctype.h"
-#include "errno.h"
-#include "signal.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <errno.h>
+#include <signal.h>
+#include <unistd.h>
 
 #define MAX_CMD_BUFFER 255
+#define MAXTOKENS 10
 
 char last_command[MAX_CMD_BUFFER] = "";
 char last_line[MAX_CMD_BUFFER] = "\0";
 
 void INThandler(int signum){
-	fflush(stdout);
+        printf("");
 }
 
 void TSTPhandler(int signum){
-	fflush(stdout);
+        printf("");
 }
 
 void ChildHandler(int sig,siginfo_t *sip,void *notused){
@@ -48,16 +50,24 @@ char* read_line(){
 	return buffer;
 }
 
+
 char** parse_line(char* line){
-	char** parse_list = malloc(sizeof(char*));
+	char** parse_list = malloc(MAXTOKENS*sizeof(char*));
 	char* temp;
-	int i = 0;
+	int x = 0;
 	temp = strtok(line," \t\r\n");
+	
 	while(temp != NULL){
-		parse_list[i] = temp;
-		i++;
+	
+		parse_list[x] = temp;
+		x++;
+		if(x >= MAXTOKENS - 1){
+			break;
+		}
 		temp = strtok(NULL," \t\r\n");
 		}
+		
+	parse_list[x] = NULL;
 	return parse_list;
 	}
 	
@@ -109,7 +119,7 @@ int execute(char** arg){
 	else if(!strcmp(arg[0],"./icsh")){
 		FILE* file = fopen(arg[1],"r");
 		char *line;
-		char **args;
+		const char **args;
 		size_t len = 0;
 		int stat = 1;
 		ssize_t read;
@@ -123,53 +133,54 @@ int execute(char** arg){
 		free(args);
 	}
 	else{
+	    signalGroup();
 	    int pid;
 	    int status;
 	    if((pid=fork()) < 0){
 		perror("Fork failed");
 		exit(errno);
 	    	}
-	    if(!pid){
-	    
-
-               
+	    else if(!pid){
 		if(execvp(arg[0],arg) < 0){
 			exit(EXIT_FAILURE);
 		}
 	    }
-	    if(pid){
+	    else if(pid){
 		waitpid(pid,NULL,0);
 	    }	
 	 }
 	 
 	 if(memcmp(&prev,&arg,sizeof(arg)) != 0){
-	 	prev = arg;
+	 	int i;
+	 	prev = malloc(i*sizeof*arg);
+	 	for(i = 0;arg[i] != NULL;i++){
+	 		prev[i] = strdup(arg[i]);
+	 	}
+	 	prev[i] = NULL;
 	 }
-	 
+	  
 	return status;
 }
 
-void remember_me(char** arg,char* temp){
-	strcpy(last_line,temp);
-        strcpy(last_command,arg[0]);
-}
-
-
-void handler_TSTP(int signum){
-	printf("\nActivate");
-	exit(signum);
-}
-
-int main() {
-    char *buffer = NULL;
-    char **arg;
-    int status = 1;
-    
+void signalGroup(){
     struct sigaction sa;
     sa.sa_flags = SA_RESTART;
     sa.sa_handler = INThandler;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGINT,&sa,NULL);
+    
+    struct sigaction sa2;
+    sa2.sa_flags = SA_RESTART;
+    sa2.sa_handler = TSTPhandler;
+    sigemptyset(&sa2.sa_mask);
+    sigaction(SIGTSTP,&sa2,NULL);
+}
+
+int main() {
+    char *buffer;
+    char *prompt;
+    char** arg;
+    int status = 1;
     
     struct sigaction sa1;
     sa1.sa_flags = 0;
@@ -177,21 +188,17 @@ int main() {
     sigemptyset(&sa1.sa_mask);
     sigaction(SIGCHLD,&sa1,NULL);
     
-    struct sigaction sa2;
-    sa2.sa_flags = SA_RESTART;
-    sa2.sa_handler = TSTPhandler;
-    sigemptyset(&sa2.sa_mask);
-    sigaction(SIGTSTP,&sa2,NULL);
-    
-    
+   
     do { 
+        signal(SIGINT,SIG_IGN);
+        signal(SIGTSTP,SIG_IGN);
         printf("icsh $ ");
         buffer = read_line();
         arg = parse_line(buffer);
         status = execute(arg);
+        free(arg);
+        free(buffer);
     }while (status == 1);
     printf("bye \n");
-    free(buffer);
-    free(arg);
     exit(status);
 }
