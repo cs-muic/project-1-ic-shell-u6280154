@@ -10,6 +10,9 @@
 #include <errno.h>
 #include <signal.h>
 #include <unistd.h>
+#include <stdbool.h>
+#include <sys/types.h>
+#include <fcntl.h>
 
 #define MAX_CMD_BUFFER 255
 #define MAXTOKENS 10
@@ -42,6 +45,15 @@ void ChildHandler(int sig,siginfo_t *sip,void *notused){
 	}
 }
 
+int redirectDetect(char **arg,char* target){
+	int i;
+	for(i = 0;arg[i] != NULL;i++){
+		if(!strcmp(arg[i],target)){
+			return i;
+		}
+	return -1;
+	}
+}
 
 char* read_line(){
 	char* buffer = NULL;
@@ -58,7 +70,6 @@ char** parse_line(char* line){
 	temp = strtok(line," \t\r\n");
 	
 	while(temp != NULL){
-	
 		parse_list[x] = temp;
 		x++;
 		if(x >= MAXTOKENS - 1){
@@ -73,28 +84,54 @@ char** parse_line(char* line){
 	
 int excode = 0;
 
+void read_me(char** arg){
+	FILE* file = fopen(arg[1],"r");
+	char *line;
+	const char **args;
+	size_t len = 0;
+	int stat = 1;
+	ssize_t read;
+	while(getline(&line,&len,file) != -1){
+		args = parse_line(line);
+		stat = execute(args);
+	}
+	excode = stat;
+	fclose(file);
+	free(line);
+	free(args);
+}
 
 char** prev;
 
+void modify_print(int i,char** arg){
+         int x;
+	 for(x = i;arg[x] != NULL;x++){
+	 	printf("%s ",arg[x]);
+	}
+	printf("\n");
+}
+
 int execute(char** arg){
-        int status = 1;   
+        int status = 1;
+        int inRedirect,outRedirect,appendRedirect;
+        inRedirect = redirectDetect(arg,'<');
+        outRedirect = redirectDetect(arg,'>');
+        appendRedirect = redirectDetect(arg,">>");
+        printf("%d",appendRedirect);
         if(arg[0] == NULL){
         	return status;
         }
-	else if(!strcmp(arg[0],"echo")){
+	else if(!strcmp(arg[0],"echo") &&     
+	       ((inRedirect+outRedirect+appendRedirect) <= -3)){
 	        if(!strcmp(arg[1],"$?")){
 	        	printf("%d\n",excode);
 	        }
 	        else{
-	            int i;
-	            for(i = 1;arg[i] != NULL;i++){
-		         printf("%s ",arg[i]);
-		    }
-		    printf("\n");
+		    modify_print(1,arg);
 	  }
 	}
 	else if(!strcmp(arg[0],"exit")){
-		if( *arg[1] >= '0' && *arg[1] <= '9'){
+		if(*arg[1] >= '0' && *arg[1] <= '255'){
 		        status = atoi(arg[1]);
 		}
 		else{
@@ -103,63 +140,111 @@ int execute(char** arg){
 	}
 	else if(!strcmp(arg[0],"!!")){
 		if(strcmp(prev[0],"!!")){
-		    int i = 0;
-		    while(prev[i] != NULL){
-		    	printf("%s ",prev[i]);
-		    	i++; 
-		    }
-		    printf("\n");
+		    modify_print(0,prev);
 		    int x = execute(prev);
 		}
 		else{
 		    printf("Previously !!\n");
 		}
 	}
-	
 	else if(!strcmp(arg[0],"./icsh")){
-		FILE* file = fopen(arg[1],"r");
-		char *line;
-		const char **args;
-		size_t len = 0;
-		int stat = 1;
-		ssize_t read;
-		while(getline(&line,&len,file) != -1){
-			args = parse_line(line);
-			stat = execute(args);
-		}
-		excode = stat;
-		fclose(file);
-		free(line);
-		free(args);
+		read_me(arg);
 	}
 	else{
-	    signalGroup();
-	    int pid;
-	    int status;
-	    if((pid=fork()) < 0){
+		//process(arg);'
+		signalGroup();
+		int pid = fork();
+		int in,out,append;
+		if(pid < 0){
 		perror("Fork failed");
 		exit(errno);
-	    	}
-	    else if(!pid){
-		if(execvp(arg[0],arg) < 0){
-			exit(EXIT_FAILURE);
-		}
-	    }
-	    else if(pid){
+	        }
+	        else if(!pid){
+		     if(inRedirect >= 0){
+		     	in = open(arg[inRedirect + 1],O_RDONLY);
+		     	dup2(in,0);
+		     	close(in);
+		         }
+		   
+	             if(outRedirect >= 0){
+		   	out = open(arg[outRedirect + 1],O_TRUNC|O_CREAT|O_WRONLY,0666);
+		   	dup2(out,1);
+		   	close(out);
+		 	}
+		 
+		     if(appendRedirect >= 0){
+		        append = open(arg[appendRedirect + 1],O_RDWR|O_CREAT|O_WRONLY,0666);
+		        dup2(append,1);
+		        close(append);
+		 
+		      }
+
+	        if(execvp(arg[0],arg) < 0){
+	        	exit(EXIT_FAILURE);
+		   }
+	}	
+	else{
 		waitpid(pid,NULL,0);
-	    }	
-	 }
-	 
-	 if(memcmp(&prev,&arg,sizeof(arg)) != 0){
-	 	int i;
-	 	prev = malloc(i*sizeof*arg);
-	 	for(i = 0;arg[i] != NULL;i++){
-	 		prev[i] = strdup(arg[i]);
-	 	}
-	 	prev[i] = NULL;
-	 }
-	  
+	    	}		
+	}	
+	if(memcmp(&prev,&arg,sizeof(arg)) != 0){
+	 	 save_me(arg);
+	}
+	 	
 	return status;
+}
+
+
+
+void process(char** arg){
+	signalGroup();
+	int pid = fork();
+	int in,out,append;
+	int inRedirect = redirectDetect(arg,"<");
+        int outRedirect = redirectDetect(arg,">");
+        int appendRedirect = redirectDetect(arg,">>");
+	    
+	if(pid < 0){
+		perror("Fork failed");
+		exit(errno);
+	}
+	else if(!pid){
+		if(inRedirect >= 0){
+		   in = open(arg[inRedirect + 1],O_RDONLY);
+		   dup2(in,0);
+		   close(in);
+		   }
+		   
+		 if(outRedirect >= 0){
+		   out = open(arg[outRedirect + 1],O_TRUNC|O_CREAT|O_WRONLY,0666);
+		   dup2(out,1);
+		   close(out);
+		 }
+		 
+		 if(appendRedirect >= 0){
+		   append = open(arg[appendRedirect + 1],O_RDWR|O_CREAT|O_WRONLY,0666);
+		   dup2(append,1);
+		   close(append);
+		 
+		 }
+
+	        if(execvp(arg[0],arg) < 0){
+	        	exit(EXIT_FAILURE);
+		   }
+	}	
+	else{
+		waitpid(pid,NULL,0);
+	    	}		
+	 }
+
+
+void save_me(char** arg){
+	int i;
+	prev = malloc(i*sizeof*arg);
+	for(i = 0;arg[i] != NULL;i++){
+	 	prev[i] = strdup(arg[i]);
+	 	}
+	prev[i] = NULL;
 }
 
 void signalGroup(){
@@ -188,7 +273,6 @@ int main() {
     sigemptyset(&sa1.sa_mask);
     sigaction(SIGCHLD,&sa1,NULL);
     
-   
     do { 
         signal(SIGINT,SIG_IGN);
         signal(SIGTSTP,SIG_IGN);
@@ -199,6 +283,7 @@ int main() {
         free(arg);
         free(buffer);
     }while (status == 1);
+    
     printf("bye \n");
     exit(status);
 }
