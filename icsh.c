@@ -45,14 +45,34 @@ void ChildHandler(int sig,siginfo_t *sip,void *notused){
 	}
 }
 
-int redirectDetect(char **arg,char* target){
+int redirectDetect1(char **arg){
 	int i;
 	for(i = 0;arg[i] != NULL;i++){
-		if(!strcmp(arg[i],target)){
+		if(!strcmp(arg[i],"<")){
 			return i;
 		}
-	return -1;
 	}
+	return -1;
+}
+
+int redirectDetect2(char **arg){
+	int i;
+	for(i = 0;arg[i] != NULL;i++){
+		if(!strcmp(arg[i],">")){
+			return i;
+		}
+	}
+	return -1;
+}
+
+int redirectDetect3(char **arg){
+	int i;
+	for(i = 0;arg[i] != NULL;i++){
+		if(!strcmp(arg[i],">>")){
+			return i;
+		}
+	}
+	return -1;
 }
 
 char* read_line(){
@@ -114,15 +134,17 @@ void modify_print(int i,char** arg){
 int execute(char** arg){
         int status = 1;
         int inRedirect,outRedirect,appendRedirect;
-        inRedirect = redirectDetect(arg,'<');
-        outRedirect = redirectDetect(arg,'>');
-        appendRedirect = redirectDetect(arg,">>");
-        printf("%d",appendRedirect);
+        inRedirect = redirectDetect1(arg);
+        outRedirect = redirectDetect2(arg);
+        appendRedirect = redirectDetect3(arg);
+        //int require = inRedirect + outRedirect + appendRedirect;
+        //printf("%s 1 \n",arg[1 + inRedirect]);
+        //printf("%s 2 \n",arg[1+outRedirect]);
+        //printf("%s 3 \n",arg[1+appendRedirect]);
         if(arg[0] == NULL){
         	return status;
         }
-	else if(!strcmp(arg[0],"echo") &&     
-	       ((inRedirect+outRedirect+appendRedirect) <= -3)){
+	if(!strcmp(arg[0],"echo") && inRedirect < 0 && outRedirect < 0 && appendRedirect < 0){
 	        if(!strcmp(arg[1],"$?")){
 	        	printf("%d\n",excode);
 	        }
@@ -130,7 +152,7 @@ int execute(char** arg){
 		    modify_print(1,arg);
 	  }
 	}
-	else if(!strcmp(arg[0],"exit")){
+	if(!strcmp(arg[0],"exit")){
 		if(*arg[1] >= '0' && *arg[1] <= '255'){
 		        status = atoi(arg[1]);
 		}
@@ -138,7 +160,7 @@ int execute(char** arg){
 		   printf("Command not found \n");
 		}
 	}
-	else if(!strcmp(arg[0],"!!")){
+	if(!strcmp(arg[0],"!!")){
 		if(strcmp(prev[0],"!!")){
 		    modify_print(0,prev);
 		    int x = execute(prev);
@@ -147,11 +169,11 @@ int execute(char** arg){
 		    printf("Previously !!\n");
 		}
 	}
-	else if(!strcmp(arg[0],"./icsh")){
+	if(!strcmp(arg[0],"./icsh")){
 		read_me(arg);
 	}
+
 	else{
-		//process(arg);'
 		signalGroup();
 		int pid = fork();
 		int in,out,append;
@@ -160,26 +182,40 @@ int execute(char** arg){
 		exit(errno);
 	        }
 	        else if(!pid){
-		     if(inRedirect >= 0){
-		     	in = open(arg[inRedirect + 1],O_RDONLY);
-		     	dup2(in,0);
-		     	close(in);
-		         }
-		   
-	             if(outRedirect >= 0){
-		   	out = open(arg[outRedirect + 1],O_TRUNC|O_CREAT|O_WRONLY,0666);
-		   	dup2(out,1);
-		   	close(out);
-		 	}
-		 
-		     if(appendRedirect >= 0){
-		        append = open(arg[appendRedirect + 1],O_RDWR|O_CREAT|O_WRONLY,0666);
-		        dup2(append,1);
-		        close(append);
-		 
-		      }
+	        	char **args;
+			int i;
+			args = malloc(i*sizeof*arg);
+			int parse = 0;
+			
+			for(i = 0;arg[i] != NULL;i++){
+				if(!strcmp(arg[i],"<")){
+					++i;
+					if((in = open(arg[i],O_RDONLY)) < 0){
+					fprintf(stderr,"error");
+					}
+					dup2(in,0);
+					close(in);
+					continue;
+					}
+				if(!strcmp(arg[i],">")){
+					++i;
+					out = open(arg[i],O_TRUNC|O_CREAT|O_WRONLY,0666);
+					dup2(out,1);
+					close(out);
+					continue;
+					}
+				if(!strcmp(arg[i],">>")){
+					++i;
+					append = open(arg[i],O_CREAT|O_RDWR|O_APPEND,0666);
+					dup2(append,1);
+					close(append);
+					continue;
+					}
+			args[parse++] = strdup(arg[i]);
+         }
+        		args[parse] = NULL;
 
-	        if(execvp(arg[0],arg) < 0){
+	        if(execvp(args[0],args) < 0){
 	        	exit(EXIT_FAILURE);
 		   }
 	}	
@@ -194,48 +230,44 @@ int execute(char** arg){
 	return status;
 }
 
-
-
-void process(char** arg){
-	signalGroup();
-	int pid = fork();
+int alternative_ex(char** arg){
+	char **args;
+	int i;
+	args = malloc(i*sizeof*arg);
+	int parse = 0;
 	int in,out,append;
-	int inRedirect = redirectDetect(arg,"<");
-        int outRedirect = redirectDetect(arg,">");
-        int appendRedirect = redirectDetect(arg,">>");
-	    
-	if(pid < 0){
-		perror("Fork failed");
-		exit(errno);
-	}
-	else if(!pid){
-		if(inRedirect >= 0){
-		   in = open(arg[inRedirect + 1],O_RDONLY);
-		   dup2(in,0);
-		   close(in);
-		   }
-		   
-		 if(outRedirect >= 0){
-		   out = open(arg[outRedirect + 1],O_TRUNC|O_CREAT|O_WRONLY,0666);
-		   dup2(out,1);
-		   close(out);
-		 }
-		 
-		 if(appendRedirect >= 0){
-		   append = open(arg[appendRedirect + 1],O_RDWR|O_CREAT|O_WRONLY,0666);
-		   dup2(append,1);
-		   close(append);
-		 
-		 }
+	for(i = 0;arg[i] != NULL;i++){
+		if(!strcmp(arg[i],"<")){
+			++i;
+			if((in = open(arg[i],O_RDONLY)) < 0){
+				fprintf(stderr,"error");
+			}
+			dup2(in,0);
+			close(in);
+			continue;
+		}
+		if(!strcmp(arg[i],">")){
+			++i;
+			out = creat(arg[i],0666);
+			dup2(out,0);
+			close(out);
+			continue;
+		}
+		if(!strcmp(arg[i],">>")){
+			++i;
+			append = open(arg[i],O_CREAT|O_RDWR|O_APPEND,0666);
+			dup2(append,0);
+			close(append);
+			continue;
+		}
+		args[parse++] = strdup(arg[i]);
+         }
+        args[parse] = NULL;
+	execvp(args[0],args);
 
-	        if(execvp(arg[0],arg) < 0){
-	        	exit(EXIT_FAILURE);
-		   }
-	}	
-	else{
-		waitpid(pid,NULL,0);
-	    	}		
-	 }
+}
+
+
 
 
 void save_me(char** arg){
