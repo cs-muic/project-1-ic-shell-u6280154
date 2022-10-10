@@ -57,6 +57,7 @@ void initial_jobs(struct job *jobs){
 
 int addjob(struct job *joblist,int pid,int state,char** arg){
 	int i;
+	int j;
 	if(pid == 0){
 		return 0;
 	}
@@ -66,9 +67,13 @@ int addjob(struct job *joblist,int pid,int state,char** arg){
 			joblist[i].job_id = next_job++;
 			jobs[i].state = state;
 			jobs[i].parsed_line = malloc(sizeof*arg);
-			for(int j = 0;arg[j] != NULL;j++){
+			for(j = 0;arg[j] != NULL;j++){
 				jobs[i].parsed_line[j] = strdup(arg[j]);
 			}
+			
+			jobs[i].parsed_line[j] = NULL;
+			
+			
 			
 			if(joblist[i].state == BACKGROUND){
 				printf("[%d] %d",joblist[i].job_id,joblist[i].pid);
@@ -306,17 +311,14 @@ int execute(char** arg){
 	     		setpgid(pid,pid);
 	     		signal(SIGTTOU,SIG_IGN);
 	     		tcsetpgrp(STDIN_FILENO,pid);
-	     		tcsetpgrp(STDOUT_FILENO,pid);
 	     		waitpid(pid,&status,WUNTRACED);
 	     		tcsetpgrp(STDIN_FILENO,getpid());
-	     		tcsetpgrp(STDOUT_FILENO,getpid());
 	     		
 	     		if(WIFEXITED(status)){
 	     			jobs[i].state = DONE;
                          }
                          else if(WIFSIGNALED(status)){
                          	jobs[i].state = DONE;
-                         
                          }
                          else if(WSTOPSIG(status)){
                          	jobs[i].state = STOPPED;
@@ -339,22 +341,19 @@ int execute(char** arg){
 void listOfjob(struct job *joblist){
 	for(int i = 0;i < MAXJOB;i++){
 		if(joblist[i].pid != 0){
-			if(joblist[i].state == BACKGROUND){
-				printf("[%d] Running            ",joblist[i].job_id);
-				modify_print(0,joblist[i].parsed_line);
-				//break;
+			printf("[%d]   ",joblist[i].job_id);
+			if(joblist[i].state == FOREGROUND){
+				printf("Foreground                ");
 			}
-			else if(joblist[i].state == FOREGROUND){
-				printf("[%d] Foreground            ",joblist[i].job_id);
-				modify_print(0,joblist[i].parsed_line);
-				//break;
+			else if(joblist[i].state == BACKGROUND){
+				printf("Running               ");            
 			}
 			else if(joblist[i].state == STOPPED){
-				printf("[%d] Stopped            ",joblist[i].job_id);
-				//break;
+				printf("Stopped               ");
 			}
-			modify_print(0,joblist[i].parsed_line);
+		modify_print(0,joblist[i].parsed_line);
 		}
+		
 	}
 }
 
@@ -388,6 +387,8 @@ int main() {
     char** arg;
     int status = 1;
     
+    signalGroup();
+    
     struct sigaction sa1;
     sa1.sa_flags = SA_RESTART;
     sa1.sa_sigaction = ChildHandler;
@@ -397,8 +398,8 @@ int main() {
     initial_jobs(jobs);
     
     do { 
-        signal(SIGINT,SIG_IGN);
-        signal(SIGTSTP,SIG_IGN);
+        //signal(SIGINT,SIG_IGN);
+        //signal(SIGTSTP,SIG_IGN);
         printf("icsh $ ");
         buffer = read_line();
         arg = parse_line(buffer);
