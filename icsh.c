@@ -27,13 +27,6 @@
 char last_command[MAX_CMD_BUFFER] = "";
 char last_line[MAX_CMD_BUFFER] = "\0";
 
-void INThandler(int signum){
-        printf("");
-}
-
-void TSTPhandler(int signum){
-        printf("");
-}
 
 struct job{
 	int pid;
@@ -45,6 +38,24 @@ struct job{
 int next_job = 1;
 
 struct job jobs[MAXJOB];
+
+void INThandler(int signum){
+        int status,id;
+        int pid;
+        id = jobid_via_pid(jobs,pid);
+        kill((jobs[id].pid),SIGINT);
+        jobs[id].state = DONE;
+        
+}
+
+void TSTPhandler(int signum){
+        int status,id;
+        int pid;
+        id = jobid_via_pid(jobs,pid);
+        kill((jobs[id].pid),SIGTSTP);
+        jobs[id].state = STOPPED;
+}
+
 
 void initial_jobs(struct job *jobs){
 	for(int i = 0; i < MAXJOB;i++){
@@ -65,15 +76,17 @@ int addjob(struct job *joblist,int pid,int state,char** arg){
 		if(joblist[i].pid == 0){
 			joblist[i].pid = pid;
 			joblist[i].job_id = next_job++;
-			jobs[i].state = state;
-			jobs[i].parsed_line = malloc(sizeof*arg);
-			for(j = 0;arg[j] != NULL;j++){
-				jobs[i].parsed_line[j] = strdup(arg[j]);
+			if(next_job > MAXJOB){
+				next_job = 1;
 			}
 			
-			jobs[i].parsed_line[j] = NULL;
+			joblist[i].state = state;
+			joblist[i].parsed_line = malloc(sizeof*arg);
+			for(j = 0;arg[j] != NULL;j++){
+				joblist[i].parsed_line[j] = strdup(arg[j]);
+			}
 			
-			
+			joblist[i].parsed_line[j] = NULL;
 			
 			if(joblist[i].state == BACKGROUND){
 				printf("[%d] %d",joblist[i].job_id,joblist[i].pid);
@@ -86,27 +99,30 @@ int addjob(struct job *joblist,int pid,int state,char** arg){
 	return 0;
 }
 
+int max_jobid(struct job * joblist){
+	 int max = 0;
+	 for(int j = 0;j < MAXJOB;j++){
+	        if(joblist[j].job_id > max){
+	            max = joblist[j].job_id;
+	        	}
+	        }
+	 return max;
+}
 
 
 int deletejob(struct job *joblist,int pid){
+        int i;
 	if(pid < 1){
 		return 0;
 	}
 	else{   
-	        int max = 0;
-	        for(int j = 0;j < MAXJOB;j++){
-	        	if(joblist[j].job_id > max){
-	        		max = joblist[j].job_id;
-	        	}
-	        }
-	        
-		for(int i = 0;i < MAXJOB;i++){
+		for(i = 0;i < MAXJOB;i++){
 			if(joblist[i].pid == pid){
-				jobs[i].pid = 0;
-				jobs[i].job_id = 0;
-				jobs[i].state = UNDEF;
-				jobs[i].parsed_line = NULL;
-				next_job = max+1;
+				joblist[i].pid = 0;
+				joblist[i].job_id = 0;
+				joblist[i].state = UNDEF;
+				joblist[i].parsed_line = NULL;
+				next_job = max_jobid(joblist) + 1;
 				return 1;
 			}
 		}
@@ -114,11 +130,38 @@ int deletejob(struct job *joblist,int pid){
 	return 0;
 }
 
+int jobid_via_pid(struct job * joblist,int pid){
+	if(pid < 1){
+		return 0;
+	}
+	for(int i = 0;i < MAXJOB;i++){
+		if(joblist[i].pid == pid){
+			return joblist[i].job_id;
+		}
+	}
+	return 0;
+}
+
+void modify_print2(int i,char** arg){
+         int x;
+	 for(x = i;strcmp(arg[x],"&");x++){
+	 	printf("%s ",arg[x]);
+	}
+	printf("\n");
+}
+
+
 void ChildHandler(int sig){
-        int status,pid;
+        fflush(stdout);
+        int status,id;
+        int pid;
 	while((pid = waitpid(-1,&status,WNOHANG)) > 0){
-	        printf("finish");
-		deletejob(jobs, pid);
+	        id = jobid_via_pid(jobs,pid) - 1;
+	        if(jobs[id].state != FOREGROUND){
+	        	printf("[%d]  Done                ",jobs[id].job_id);
+	        	modify_print2(0,jobs[id].parsed_line);
+	        }
+	        deletejob(jobs,pid);
 	}
 }
 
@@ -387,7 +430,18 @@ int main() {
     char** arg;
     int status = 1;
     
-    signalGroup();
+    //signalGroup();
+    struct sigaction sa;
+    sa.sa_flags = 0;
+    sa.sa_sigaction = SIG_IGN;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGINT,&sa,NULL);
+    
+    struct sigaction sa2;
+    sa2.sa_flags = 0;
+    sa2.sa_sigaction = SIG_IGN;
+    sigemptyset(&sa2.sa_mask);
+    sigaction(SIGTSTP,&sa2,NULL);
     
     struct sigaction sa1;
     sa1.sa_flags = SA_RESTART;
@@ -396,10 +450,7 @@ int main() {
     sigaction(SIGCHLD,&sa1,NULL);
     
     initial_jobs(jobs);
-    
     do { 
-        //signal(SIGINT,SIG_IGN);
-        //signal(SIGTSTP,SIG_IGN);
         printf("icsh $ ");
         buffer = read_line();
         arg = parse_line(buffer);
