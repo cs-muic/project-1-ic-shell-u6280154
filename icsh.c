@@ -24,10 +24,6 @@
 #define DONE 4
 #define MAXJOB 20
 
-char last_command[MAX_CMD_BUFFER] = "";
-char last_line[MAX_CMD_BUFFER] = "\0";
-
-
 struct job{
 	int pid;
 	int job_id;
@@ -39,21 +35,21 @@ int next_job = 1;
 
 struct job jobs[MAXJOB];
 
-void INThandler(int signum){
-        int status,id;
-        int pid;
-        id = jobid_via_pid(jobs,pid);
-        kill((jobs[id].pid),SIGINT);
-        jobs[id].state = DONE;
-        
-}
-
-void TSTPhandler(int signum){
-        int status,id;
-        int pid;
-        id = jobid_via_pid(jobs,pid);
-        kill((jobs[id].pid),SIGTSTP);
-        jobs[id].state = STOPPED;
+void GeneralHandler(int signum){
+	int status,id,pid;
+	id = jobid_via_pid(jobs,pid);
+	switch(signum){
+		case 2:
+			kill((jobs[id].pid),SIGINT);
+                        jobs[id].state = DONE;
+                        break;
+                case 20:
+                        kill((jobs[id].pid),SIGTSTP);
+                        jobs[id].state = STOPPED;
+                        break;
+                default:
+                        printf("ERROR");
+	}
 }
 
 
@@ -142,14 +138,25 @@ int jobid_via_pid(struct job * joblist,int pid){
 	return 0;
 }
 
-void modify_print2(int i,char** arg){
-         int x;
-	 for(x = i;strcmp(arg[x],"&");x++){
-	 	printf("%s ",arg[x]);
+void modify_print(int i,char** arg,int key){
+	int x;
+	switch (key){
+		case 1:
+			for(x = i;arg[x] != NULL;x++){
+	 			printf("%s ",arg[x]);
+			}
+			printf("\n");
+			break;
+		case 2:
+		        for(x = i;strcmp(arg[x],"&");x++){
+	 			printf("%s ",arg[x]);
+			}
+			printf("\n");
+			break;
+	        default:
+	                printf("ERROR");	
 	}
-	printf("\n");
 }
-
 
 void ChildHandler(int sig){
         fflush(stdout);
@@ -159,7 +166,7 @@ void ChildHandler(int sig){
 	        id = jobid_via_pid(jobs,pid) - 1;
 	        if(jobs[id].state != FOREGROUND){
 	        	printf("[%d]  Done                ",jobs[id].job_id);
-	        	modify_print2(0,jobs[id].parsed_line);
+	        	modify_print(0,jobs[id].parsed_line,2);
 	        }
 	        deletejob(jobs,pid);
 	}
@@ -251,15 +258,7 @@ void read_me(char** arg){
 	free(args);
 }
 
-char** prev;
-
-void modify_print(int i,char** arg){
-         int x;
-	 for(x = i;arg[x] != NULL;x++){
-	 	printf("%s ",arg[x]);
-	}
-	printf("\n");
-}
+char** prev = NULL;
 
 int execute(char** arg){
         int inRedirect,outRedirect,appendRedirect,background;
@@ -275,7 +274,7 @@ int execute(char** arg){
 	        	printf("%d\n",excode);
 	        }
 	        else{
-		    modify_print(1,arg);
+		    modify_print(1,arg,1);
 	        }
 	}
 	else if(!strcmp(arg[0],"exit")){
@@ -286,13 +285,15 @@ int execute(char** arg){
 		   printf("Command not found \n");
 		}
 	}
-	else if(!strcmp(arg[0],"!!")){
+	else if(!strcmp(arg[0],"!!") && prev != NULL){
 		if(strcmp(prev[0],"!!")){
-		    modify_print(0,prev);
+		    modify_print(0,prev,1);
 		    int x = execute(prev);
+		    //printf("Success");
 		}
 		else{
 		    printf("Previously !!\n");
+		    
 		}
 	}
 	else if(!strcmp(arg[0],"./icsh")){
@@ -300,6 +301,11 @@ int execute(char** arg){
 	}
 	else if(!strcmp(arg[0],"jobs")){
 		listOfjob(jobs);
+	}
+	else if(!strcmp(arg[0],"fg")){
+		int id;
+		id = atoi(&arg[1][1]);
+		printf("%d \n",id);
 	}
 	else{
 	     signalGroup();
@@ -381,45 +387,50 @@ int execute(char** arg){
 	return 1;
 }
 
-void listOfjob(struct job *joblist){
-	for(int i = 0;i < MAXJOB;i++){
-		if(joblist[i].pid != 0){
-			printf("[%d]   ",joblist[i].job_id);
-			if(joblist[i].state == FOREGROUND){
-				printf("Foreground                ");
-			}
-			else if(joblist[i].state == BACKGROUND){
-				printf("Running               ");            
-			}
-			else if(joblist[i].state == STOPPED){
-				printf("Stopped               ");
-			}
-		modify_print(0,joblist[i].parsed_line);
-		}
-		
-	}
-}
-
-
 void save_me(char** arg){
 	int i;
-	prev = malloc(i*sizeof*arg);
+	free(prev);
+	prev = malloc(MAXTOKENS*sizeof*arg);
 	for(i = 0;arg[i] != NULL;i++){
 	 	prev[i] = strdup(arg[i]);
 	 	}
 	prev[i] = NULL;
 }
 
+void listOfjob(struct job *joblist){
+	for(int i = 0;i < MAXJOB;i++){
+		if(joblist[i].pid != 0){
+			if(joblist[i].state == DONE){
+				deletejob(joblist,joblist[i].pid);
+				continue;
+			}
+			else if(joblist[i].state == FOREGROUND){
+			        printf("[%d]   ",joblist[i].job_id);
+				printf("Foreground            ");
+			}
+			else if(joblist[i].state == BACKGROUND){
+			        printf("[%d]   ",joblist[i].job_id);
+				printf("Running               ");            
+			}
+			else if(joblist[i].state == STOPPED){
+			        printf("[%d]   ",joblist[i].job_id);
+				printf("Stopped               ");
+			}
+		modify_print(0,joblist[i].parsed_line,1);
+		}
+	}
+}
+
 void signalGroup(){
     struct sigaction sa;
     sa.sa_flags = SA_RESTART;
-    sa.sa_handler = INThandler;
+    sa.sa_handler = GeneralHandler;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGINT,&sa,NULL);
     
     struct sigaction sa2;
     sa2.sa_flags = SA_RESTART;
-    sa2.sa_handler = TSTPhandler;
+    sa2.sa_handler = GeneralHandler;
     sigemptyset(&sa2.sa_mask);
     sigaction(SIGTSTP,&sa2,NULL);
 }
@@ -429,8 +440,7 @@ int main() {
     char *prompt;
     char** arg;
     int status = 1;
-    
-    //signalGroup();
+
     struct sigaction sa;
     sa.sa_flags = 0;
     sa.sa_sigaction = SIG_IGN;
