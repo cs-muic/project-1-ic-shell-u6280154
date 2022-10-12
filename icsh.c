@@ -66,8 +66,7 @@ void initial_jobs(struct job *jobs){
 }
 
 int addjob(struct job *joblist,int pid,int state,char** arg){
-	int i;
-	int j;
+	int i,j;
 	if(pid == 0){
 		return 0;
 	}
@@ -160,9 +159,17 @@ void modify_print(int i,char** arg,int key){
 			printf("\n");
 			break;
 		case 2:
+		        if(Detection(arg,"&") == -1){
 		        for(int x = i;strcmp(arg[x],"&");x++){
 	 			printf("%s ",arg[x]);
-			}
+			   } 
+			   printf("&");
+		        }
+		        else{
+		            for(int x = i;strcmp(arg[x],"&");x++){
+	 			printf("%s ",arg[x]);
+			    }
+		        }
 			printf("\n");
 			break;
 	        default:
@@ -171,8 +178,7 @@ void modify_print(int i,char** arg,int key){
 }
 
 void ChildHandler(int sig){
-        int status,id;
-        int pid;
+        int status,id,pid;
 	while((pid = waitpid(-1,&status,WNOHANG)) > 0){
 	        id = jobid_via_pid(jobs,pid) - 1;
 	        if(jobs[id].state != FOREGROUND){
@@ -301,12 +307,31 @@ int execute(char** arg){
 		        }
 		}
 	}
+	else if(!strcmp(arg[0],"bg")){
+		int id,status,i;
+		if(arg[1] == NULL){
+			printf("ERROR");
+		}
+		else{
+		        id = atoi(&arg[1][1]) - 1;
+		        if(iden_jobid(jobs,id) != false){
+		        	jobs[id].state = BACKGROUND;
+		        	for(i = 0;jobs[id].parsed_line[i] != NULL;i++){
+		        	}
+		        	jobs[id].parsed_line[i] = strdup("&");
+		        	jobs[id].parsed_line[i+1] = NULL;
+		        	kill(jobs[id].pid,SIGCONT);
+		        	}
+		        else{
+		        	printf("ERROR");
+		        }
+		}
+	}
 	else{
 	     signalGroup();
-	     int status;
+	     int status,in,out,append,parse;
 	     int pid = fork();
 	     char **args;
-	     int in,out,append,parse;
 	     if(pid < 0){ //Error
 		  perror("Fork failed");
 		  exit(errno);
