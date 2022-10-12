@@ -46,6 +46,9 @@ void GeneralHandler(int signum){
                 case 20:
                         kill((jobs[id].pid),SIGTSTP);
                         jobs[id].state = STOPPED;
+                        printf("\n[%d]   ",jobs[id].job_id);
+			printf("Stopped               ");
+			modify_print(0,jobs[id].parsed_line,1);
                         break;
                 default:
                         printf("ERROR");
@@ -105,14 +108,12 @@ int max_jobid(struct job * joblist){
 	 return max;
 }
 
-
 int deletejob(struct job *joblist,int pid){
-        int i;
 	if(pid < 1){
 		return 0;
 	}
 	else{   
-		for(i = 0;i < MAXJOB;i++){
+		for(int i = 0;i < MAXJOB;i++){
 			if(joblist[i].pid == pid){
 				joblist[i].pid = 0;
 				joblist[i].job_id = 0;
@@ -138,17 +139,28 @@ int jobid_via_pid(struct job * joblist,int pid){
 	return 0;
 }
 
+bool iden_jobid(struct job * joblist,int job_id){
+	if(job_id < 0){
+		return false;
+	}
+	for(int i = 0;i < MAXJOB;i++){
+		if(joblist[i].job_id == job_id){
+			return true;
+		}
+	}
+	return false;
+}
+
 void modify_print(int i,char** arg,int key){
-	int x;
 	switch (key){
 		case 1:
-			for(x = i;arg[x] != NULL;x++){
+			for(int x = i;arg[x] != NULL;x++){
 	 			printf("%s ",arg[x]);
 			}
 			printf("\n");
 			break;
 		case 2:
-		        for(x = i;strcmp(arg[x],"&");x++){
+		        for(int x = i;strcmp(arg[x],"&");x++){
 	 			printf("%s ",arg[x]);
 			}
 			printf("\n");
@@ -159,7 +171,6 @@ void modify_print(int i,char** arg,int key){
 }
 
 void ChildHandler(int sig){
-        fflush(stdout);
         int status,id;
         int pid;
 	while((pid = waitpid(-1,&status,WNOHANG)) > 0){
@@ -172,40 +183,10 @@ void ChildHandler(int sig){
 	}
 }
 
-int redirectDetect1(char **arg){
+int Detection(char **arg,char* target){
 	int i;
 	for(i = 0;arg[i] != NULL;i++){
-		if(!strcmp(arg[i],"<")){
-			return i;
-		}
-	}
-	return -1;
-}
-
-int redirectDetect2(char **arg){
-	int i;
-	for(i = 0;arg[i] != NULL;i++){
-		if(!strcmp(arg[i],">")){
-			return i;
-		}
-	}
-	return -1;
-}
-
-int redirectDetect3(char **arg){
-	int i;
-	for(i = 0;arg[i] != NULL;i++){
-		if(!strcmp(arg[i],">>")){
-			return i;
-		}
-	}
-	return -1;
-}
-
-int backgroundDetect(char **arg){
-	int i;
-	for(i = 0;arg[i] != NULL;i++){
-		if(!strcmp(arg[i],"&")){
+		if(!strcmp(arg[i],target)){
 			return i;
 		}
 	}
@@ -262,10 +243,10 @@ char** prev = NULL;
 
 int execute(char** arg){
         int inRedirect,outRedirect,appendRedirect,background;
-        inRedirect = redirectDetect1(arg);
-        outRedirect = redirectDetect2(arg);
-        appendRedirect = redirectDetect3(arg);
-        background = backgroundDetect(arg);
+        inRedirect = Detection(arg,"<");
+        outRedirect = Detection(arg,">");
+        appendRedirect = Detection(arg,">>");
+        background = Detection(arg,"&");
         if(arg[0] == NULL){
         	return 1;
         }
@@ -289,7 +270,6 @@ int execute(char** arg){
 		if(strcmp(prev[0],"!!")){
 		    modify_print(0,prev,1);
 		    int x = execute(prev);
-		    //printf("Success");
 		}
 		else{
 		    printf("Previously !!\n");
@@ -303,9 +283,23 @@ int execute(char** arg){
 		listOfjob(jobs);
 	}
 	else if(!strcmp(arg[0],"fg")){
-		int id;
-		id = atoi(&arg[1][1]);
-		printf("%d \n",id);
+		int id,status;
+		if(arg[1] == NULL){
+			printf("ERROR");
+		}
+		else{
+		        id = atoi(&arg[1][1]) - 1;
+		        if(iden_jobid(jobs,id) != false){
+		        	jobs[id].state = FOREGROUND;
+		        	kill(jobs[id].pid,SIGCONT);
+		        	modify_print(0,jobs[id].parsed_line,2);
+		        	waitpid(jobs[id].pid,&status,WUNTRACED);
+		        	jobs[id].state = DONE;
+		        }
+		        else{
+		        	printf("ERROR");
+		        }
+		}
 	}
 	else{
 	     signalGroup();
@@ -379,11 +373,9 @@ int execute(char** arg){
 	     	    }
 	    	}		
 	}	
-	
 	if(memcmp(&prev,&arg,sizeof(arg)) != 0){
 	 	 save_me(arg);
 	}
-	 	
 	return 1;
 }
 
